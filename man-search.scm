@@ -372,32 +372,33 @@
 ;; Flags may appear anywhere in the argument list.
 (define (split-flags args)
   (let loop ((as args) (debug? #f) (max-width 80) (point? #f) (file-path? #f)
-             (context #f) (terms '()))
+             (context #f) (limit no-limit) (terms '()))
     (match as
-      (() (values debug? max-width point? file-path? context (reverse terms)))
+      (() (values debug? max-width point? file-path? context limit (reverse terms)))
       ((a . rest)
        (cond ((string=? a "--debug")
-              (loop rest #t max-width point? file-path? context terms))
+              (loop rest #t max-width point? file-path? context limit terms))
              ((string=? a "--point")
-              (loop rest debug? max-width #t file-path? context terms))
+              (loop rest debug? max-width #t file-path? context limit terms))
              ((string=? a "--file-path")
-              (loop rest debug? max-width point? #t context terms))
+              (loop rest debug? max-width point? #t context limit terms))
              ((string=? a "--context")
-              (loop rest debug? max-width point? file-path? 1 terms))
-             ((string-match "^--limit=(.*)$" a)
-              => (lambda (m)
-                   (loop rest debug? (parse-limit (match:substring m 1)) ...)))
+              (loop rest debug? max-width point? file-path? 1 limit terms))
              ((string-match "^--context=(.*)$" a)
               => (lambda (m)
                    (let ((k (string->number (match:substring m 1))))
                      (loop rest debug? max-width point? file-path?
                            (if (and k (> k 0)) (inexact->exact (truncate k)) 1)
-                           terms))))
+                           limit terms))))
+             ((string-match "^--limit=(.*)$" a)
+              => (lambda (m)
+                   (loop rest debug? max-width point? file-path? context
+                         (parse-limit (match:substring m 1)) terms)))
              ((string-match "^--max-width=(.*)$" a)
               => (lambda (m)
                    (loop rest debug? (parse-max-width (match:substring m 1))
-                         point? file-path? context terms)))
-             (else (loop rest debug? max-width point? file-path? context
+                         point? file-path? context limit terms)))
+             (else (loop rest debug? max-width point? file-path? context limit
                          (cons a terms))))))))
 
 (let ((usage "Usage: ~a DBPATH [--debug] [--max-width=N] [--point] [--file-path] [--context[=N]] QUERY...~%"))
@@ -408,7 +409,7 @@
                  "no database at ~a~%run `notman index` to build it"
                  dbpath)
          (call-with-values (lambda () (split-flags rest))
-           (lambda (debug? max-width point? file-path? context terms)
+           (lambda (debug? max-width point? file-path? context limit terms)
              (if (null? terms)
                  (format (current-error-port)
                          usage
@@ -416,7 +417,7 @@
                  (search dbpath (string-join terms)
                          #:debug? debug? #:max-width max-width
                          #:point? point? #:file-path? file-path?
-                         #:context context))))))
+                         #:context context #:limit limit))))))
     ((program . _)
      (format (current-error-port)
              usage
