@@ -151,6 +151,17 @@
                       "warning: bad --max-width=~a; using 80~%" s)
               80)))
 
+;; Accepts N, inf, infinity, infinite, unlimited.  Zero or negative means no
+;; limit: a search for zero matches is never what you want.
+(define (parse-limit s)
+  (cond ((member s '("inf" "infinity" "infinite" "unlimited")) no-limit)
+        ((string->number s)
+         => (lambda (n) (let ((n (inexact->exact (truncate n))))
+                          (if (<= n 0) no-limit n))))
+        (else (format (current-error-port)
+                      "warning: bad --limit=~a; showing all matches~%" s)
+              no-limit)))
+
 ;; Collapse runs of whitespace to single spaces so a paragraph fits one line.
 (define (flatten s)
   (string-trim-both
@@ -296,7 +307,7 @@
            (flatten (substring text lo hi))
            (if (< hi hi0) "..." ""))))))
 
-(define* (search dbpath querystring #:key (pagesize 20) (debug? #f)
+(define* (search dbpath querystring #:key (limit no-limit) (debug? #f)
                  (max-width 80) (point? #f) (file-path? #f) (context #f))
   (let* ((fields (section-fields dbpath))
          (prefixes (map (lambda (f) (cons f (prefix-for f))) fields))
@@ -315,7 +326,7 @@
                                    #:stemmer (stemmer-for sname)
                                    #:prefixes prefixes
                                    #:boolean-prefixes boolean-prefixes))
-               (mset (enquire-mset (enquire db query) #:maximum-items pagesize))
+               (mset (enquire-mset (enquire db query) #:maximum-items limit))
                (hits
                 (reverse
                  (mset-fold
@@ -373,6 +384,9 @@
               (loop rest debug? max-width point? #t context terms))
              ((string=? a "--context")
               (loop rest debug? max-width point? file-path? 1 terms))
+             ((string-match "^--limit=(.*)$" a)
+              => (lambda (m)
+                   (loop rest debug? (parse-limit (match:substring m 1)) ...)))
              ((string-match "^--context=(.*)$" a)
               => (lambda (m)
                    (let ((k (string->number (match:substring m 1))))
