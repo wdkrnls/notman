@@ -1,0 +1,95 @@
+#!/bin/sh
+# notman -- index and search man pages.
+#
+#   notman index  [--rebuild] [--lang=LANG] [--man-root=PATH] [--file=PATH,...]
+#   notman search [--context[=N]] [--point] [--file-path] [--debug] QUERY...
+#   notman paths
+#   notman render PATH
+#
+# The database and its sidecars live in DIR/man.db*, where DIR is
+# --db-path=DIR if given, else $NOTMAN_DB_DIR, else
+# ${XDG_DATA_HOME:-$HOME/.local/share}/notman.
+
+set -eu
+
+prog=${0##*/}
+bindir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# Locate the .scm files.  Installed, this dispatcher sits beside them in
+# share/notman; in the source tree it sits beside them too.  The bin/../share
+# case covers a dispatcher installed under bin/.  If none of these hold, say
+# so here rather than leaving libdir unset -- under `set -u` that only
+# surfaces later, as a confusing "unbound variable" at the point of use.
+# Locate the .scm files.  Installed, this dispatcher sits in bin/ and the
+# scripts in ../lib/notman; in the source tree it sits beside them.  If none
+# of these hold, say so here rather than leaving libdir unset -- under
+# `set -u` that only surfaces later, as a confusing "unbound variable".
+if [ -n "${NOTMAN_LIBDIR:-}" ] && [ -f "$NOTMAN_LIBDIR/man-index.scm" ]; then
+    libdir=$NOTMAN_LIBDIR
+elif [ -f "$bindir/man-index.scm" ]; then
+    libdir=$bindir
+elif [ -f "$bindir/../lib/notman/man-index.scm" ]; then
+    libdir=$bindir/../lib/notman
+else
+    printf '%s: cannot find man-index.scm near %s\n' "$prog" "$0" >&2
+    printf 'set NOTMAN_LIBDIR to the directory holding the .scm files\n' >&2
+    exit 1
+fi
+
+data_dir=${NOTMAN_DB_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/notman}
+
+usage() {
+    cat >&2 <<EOF
+usage: notman index  [--rebuild] [--lang=LANG] [--man-root=PATH] [--file=PATH,...]
+       notman search [--context[=N]] [--point] [--file-path] [--debug] QUERY...
+       notman paths
+       notman render PATH
+
+  --db-path=DIR   where the database lives (default: $data_dir)
+EOF
+    exit 2
+}
+
+# Peel --db-path=DIR out of "$@", leaving the rest in order.
+n=$#
+while [ "$n" -gt 0 ]; do
+    a=$1
+    shift
+    case $a in
+        --db-path=*) data_dir=${a#--db-path=} ;;
+        *) set -- "$@" "$a" ;;
+    esac
+    n=$((n - 1))
+done
+
+[ $# -gt 0 ] || usage
+cmd=$1
+shift
+
+case $cmd in
+    index)
+        mkdir -p -- "$data_dir"
+        exec guile "$libdir/man-index.scm" "$@" "$data_dir/man.db"
+        ;;
+    search)
+        if [ ! -e "$data_dir/man.db" ]; then
+            printf '%s: no database at %s\n' "$prog" "$data_dir/man.db" >&2
+            printf 'run `notman index` to build it\n' >&2
+            exit 1
+        fi
+        exec guile "$libdir/man-search.scm" "$data_dir/man.db" "$@"
+        ;;
+    paths)
+        exec guile "$libdir/man-index.scm" --man-roots "$@"
+        ;;
+    render)
+        exec guile "$libdir/man-index.scm" --render "$@"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        printf '%s: unknown subcommand: %s\n' "$prog" "$cmd" >&2
+        usage
+        ;;
+esac
