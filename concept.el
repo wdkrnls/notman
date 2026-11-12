@@ -2709,6 +2709,10 @@ relationship has a colon at the beginning of the statement."
       string))
    strings))
 
+(defun concept-word-length (string)
+  "Measure the length of a concept by how many `words' it has."
+  (1+ (seq-count (lambda (c) (eq c ?\-)) string)))
+
 (defun concept--max-words (list-of-strings)
   (1+ (seq-max (concept--count-hyphens-per-string list-of-strings))))
 
@@ -4544,13 +4548,118 @@ express logical combinations like: `A', `B', or `C' versus `A', `B', and
               (number-sequence 1 degree)
               "\n"))))))
 
-(defun concept-expand-pdf-resources (path)
+(defun concept-make-bridge-relationship (subject object &rest extra)
+  "Make an include relationship between a subject and an object."
+  (beginning-of-line)
+  (insert
+   (format "~ %s\n| :%s\n| %s\n" subject "include" object))
+  (dolist (obj extra)
+    (insert (format "| %s\n" obj)))
+  (when (save-excursion (forward-line) (concept-current-line-blank-p))
+    (forward-line)
+    (kill-whole-line)))
+
+(defun concept-expand-relationship-bridges ()
+  "Automatically generate relationships between obviously related
+data concepts.
+
+This works for for relationship blocks hold only one include
+relationship and no others. There must be atleast one data concept in
+each block which is one `word' away from matching with the other.
+
+Take the example below to illustrate:
+
+Suppose we have two adjacent relationship blocks about commit names. The
+only difference is that the second block is about git commit names. So,
+we insert a tempel template keyword connect** between them and run it's
+expansion. Then, this:
+
+~ commit-names
+| :include
+| relative-commit-names
+| absolute-commit-names
+bridge*
+~ git-commit-names
+| :include
+| absolute-git-commit-names
+| relative-git-commit-names
+
+becomes this:
+
+~ commit-names
+| :include
+| relative-commit-names
+| absolute-commit-names
+~ relative-commit-names
+| :include
+| relative-git-commit-names
+~ absolute-git-commit-names
+| :include
+| absolute-git-commit-names
+~ git-commit-names
+| :include
+| absolute-git-commit-names
+| relative-git-commit-names
+
+The function picks up automatically that `relative-commit-names' and
+`relative-git-commit-names' are off by one `word' and fills in that
+`word': git.
+"
+  ;; TODO: implement it by filling the missing functions my-distance, my-length, and my-text.
+  (let (above-concepts below-concepts)
+    (save-excursion
+      (re-search-backward "^|" nil)
+      (concept-goto-current-focus)
+      (let ((N (concept-relationship-group-count))
+            (i 0))
+        (while (< i N)
+          (concept-goto-next-relationship)
+          (setq i (1+ i))
+          (let ((rel (concept-current-relationship)))
+            (when (string= rel "include")
+              (setq above-concepts
+                    (append (concept-get-child-concepts)
+                            above-concepts)))))))
+    (save-excursion
+      (re-search-forward "^~" nil)
+      (concept-goto-current-focus)
+      (let ((N (concept-relationship-group-count))
+            (i 0))
+        (while (< i N)
+          (concept-goto-next-relationship)
+          (setq i (1+ i))
+          (let ((rel (concept-current-relationship)))
+            (when (string= rel "include")
+              (setq below-concepts
+                    (append (concept-get-child-concepts)
+                            below-concepts)))))))
+    (setq above-concepts (nreverse above-concepts)
+          below-concepts (nreverse below-concepts))
+       (dolist (above above-concepts)
+         (dolist (below below-concepts)
+           (when (= 1 (concept-word-edit-distance above below))
+             (let ((above-length (concept-word-length above))
+                   (below-length (concept-word-length below)))
+               (if (< above-length below-length)
+                   (concept-make-bridge-relationship above below)
+                 (concept-make-bridge-relationship below above))))))))
+
+(defun concept-expand-pdf-resources (path &optional media name)
   "Generate a resource template for PDF files.
 Given the file PATH it finds the buffer associated with that file, grabs
 the page number, and constructs the resource block."
   (unless (bufferp (get-file-buffer path))
     (user-error "No existing buffer is visiting that file: %s" path))
   (insert "@ document\n")
+  (let ((name-given (stringp name))
+        (media-given (stringp media)))
+    (when (or name-given media-given)
+      (if (not media-given)
+          (insert "| reference:\n")
+        (insert (format "| %s:\n" media)))
+      (if (not name-given)
+          (insert (format "| {%s}\n" (file-name-sans-extension (file-name-base path))))
+        (insert "| {" name "}\n"))))
   (insert "| file:\n")
   (insert (format "| {%s}\n" path))
   (insert "| pdf-page:\n")
@@ -11217,6 +11326,42 @@ This is a helper function to interactively validate the results of
                     (list (line-number-at-pos (point))
                           (concept-diff--find-line-number-in-source)))))))))
 
+(defun concept--sequence-edit-distance (a b)
+  "Return Damerau-Levenshtein edit distance between vectors A and B.
+Insertion, deletion, replacement, and adjacent transposition each cost 1."
+  (let* ((n (length a))
+         (m (length b))
+         (d (make-vector (1+ m) nil)))
+    (dotimes (i (1+ m))
+      (aset d i (make-vector (1+ n) 0)))
+    (dotimes (i (1+ m))
+      (aset (aref d i) 0 i))
+    (dotimes (j (1+ n))
+      (aset (aref d 0) j j))
+    (dotimes (i m)
+      (dotimes (j n)
+        (let* ((row (1+ i))
+               (col (1+ j))
+               (cost (if (equal (aref b i) (aref a j)) 0 1))
+               (value
+                (min
+                 (1+ (aref (aref d (1- row)) col))
+                 (1+ (aref (aref d row) (1- col)))
+                 (+ cost (aref (aref d (1- row)) (1- col))))))
+          (when (and (> i 0) (> j 0)
+                     (equal (aref a (1- j)) (aref b i))
+                     (equal (aref a j) (aref b (1- i))))
+            (setq value (min value (+ 1 (aref (aref d (- row 2)) (- col 2))))))
+          (aset (aref d row) col value))))
+    (aref (aref d m) n)))
+
+(defun concept-word-edit-distance (this-concept that-concept)
+  "Return word-level Damerau-Levenshtein edit distance between two
+hyphenated phrases.  E.g. \"foo-bar-baz\" vs \"bar-foo-baz\" is 1."
+  (concept--sequence-edit-distance
+   (vconcat (split-string this-concept "-" t))
+   (vconcat (split-string that-concept "-" t))))
+
 (defun concept-diff--assert-not-hunk-header ()
   (beginning-of-line)
   (when (looking-at "^@@")
@@ -11227,6 +11372,8 @@ This is a helper function to interactively validate the results of
 
 Insertion, deletion, replacement, and adjacent transposition operations
 each cost 1."
+  ;; TODO: implement in terms of concept--sequence-edit-distance
+  ;;       (concept--sequence-edit-distance (vconcat old-lines) (vconcat new-lines))
   (let* ((a (vconcat old-lines))
          (b (vconcat new-lines))
          (n (length a))
