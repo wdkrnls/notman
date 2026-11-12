@@ -9719,14 +9719,42 @@ instead of `browse-url-new-window-flag'."
                        t)
           (current-buffer))))
 
+(defconst concept-info-ref-regexp
+  "(\\([^()\n]+\\)) *\\([[:alnum:]]+ \\)*[[:alnum:]]+"
+  "Matches an Info reference such as \"(emacs-mime) Top\".")
+
+(defun concept-info-ref-at-point ()
+  "Return (MANUAL . FULL-STRING) for the longest Info ref covering point."
+  (let ((pt (point)) best-end best-beg manual)
+    (save-excursion
+      (when (looking-at-p "(") (forward-char 1))   ; include a ( at point
+      (while (search-backward "(" nil t)
+        (when (looking-at concept-info-ref-regexp)
+          (let ((mb (match-beginning 0)) (me (match-end 0)))
+            (when (and (<= mb pt) (<= pt me)
+                       (or (null best-end) (> me best-end)))
+              (setq best-end me best-beg mb
+                    manual (match-string-no-properties 1)))))))
+    (when best-end
+      (cons manual (buffer-substring-no-properties best-beg best-end)))))
+
+(defun concept-info-follow-at-point ()
+  "Follow the Info reference at point."
+  (interactive)
+  (if-let ((ref (concept-info-ref-at-point)))
+      (info (cdr ref))
+    (user-error "No Info reference at point")))
+
 (defun concept-info-follow ()
   "Make an info-follow analogous to what man-follow does for man pages."
   (interactive)
-  (when (concept-on-exposition-line)
-    (let ((manual-name
-           (concept-get-expository-data)))
-      (when manual-name
-        (info manual-name)))))
+  (if (derived-mode-p 'concept-mode)
+      (when (concept-on-exposition-line)
+        (let ((manual-name
+               (concept-get-expository-data)))
+          (when manual-name
+            (info manual-name))))
+    (concept-info-follow-at-point)))
 
 (defun concept-find-file ()
   "Find files on the current line."
