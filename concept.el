@@ -9741,20 +9741,20 @@ instead of `browse-url-new-window-flag'."
 (defun concept-info-follow-at-point ()
   "Follow the Info reference at point."
   (interactive)
-  (if-let ((ref (concept-info-ref-at-point)))
+  (if-let* ((ref (concept-info-ref-at-point)))
       (info (cdr ref))
     (user-error "No Info reference at point")))
 
 (defun concept-info-follow ()
   "Make an info-follow analogous to what man-follow does for man pages."
   (interactive)
-  (if (derived-mode-p 'concept-mode)
-      (when (concept-on-exposition-line)
+  (if (and  (derived-mode-p 'concept-mode)
+            (concept-on-exposition-line))
         (let ((manual-name
                (concept-get-expository-data)))
           (when manual-name
             (info manual-name))))
-    (concept-info-follow-at-point)))
+    (concept-info-follow-at-point))
 
 (defun concept-find-file ()
   "Find files on the current line."
