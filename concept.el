@@ -5190,6 +5190,9 @@ Choose the new concept from the ordered list of all concepts."
     (let* ((attrib (concept-current-attribute))
            (choices (concept-find-all-expositions attrib))
            (current (concept-current-exposition))
+           (completion-ignore-case t)
+           (completion-styles '(orderless basic))
+           (vertico-sort-override-function #'vertico-sort-length-alpha)
            (vertico-sort-function nil)
            (pick (completing-read
                   "Exposition: "
