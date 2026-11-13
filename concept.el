@@ -1192,6 +1192,15 @@ selected line then this will return nil.
 	     (outline-on-heading-p))
 	(concept--current-heading-text)))))
 
+(defun concept-last-focus ()
+  "Navigate to the next focus block"
+  (save-excursion
+    (concept-goto-current-focus)
+    (condition-case err
+        (progn (concept-goto-previous-concept-block)
+               (concept-current-focus))
+      (error nil))))
+
 (defun concept-next-focus ()
   "Navigate to the next focus block"
   (save-excursion
@@ -5557,20 +5566,37 @@ by this command in practice."
         (on-focus-line (concept-on-focus-line))
         (on-blank-line (concept-on-blank-line))
         (line-move-visual nil))
-    (when (and on-focus-line
-               (equal 0 (concept-relationship-count)))
+    (cond
+     ((and on-focus-line
+           (equal 0 (concept-relationship-count)))
       (concept-toggle-focus-data)
       (end-of-line))
-    (when (and on-data-line (not on-blank-line))
-      (beginning-of-line)
-      (kill-line)
-      (kill-line)
+     ((and on-focus-line
+           (concept-map-has-more-concept-blocks -1)
+           (string= (concept-current-focus) (concept-last-focus))
+           (save-excursion
+             (concept-goto-previous-concept-block)
+             (= (concept-resource-block-count) 0)))
+      (concept-goto-previous-concept-block)
+      (concept-end-of-subtree)
+      (forward-char)
+      (kill-whole-line)
+      (forward-line -1)
+      (end-of-line))
+     ((and on-data-line (not on-blank-line))
+      (kill-whole-line)
+      (forward-char -1)
+      (when (= 0 (concept-relationship-group-concept-count))
+        (delete-line))
       (re-search-forward "^~" nil t)
       (beginning-of-line)
       (open-line 1)
-      (yank 2)
+      (yank)
+      (when (concept-current-line-empty-p)
+        (delete-line))
+      (forward-line -1)
       (concept-toggle-focus-data)
-      (end-of-line))))
+      (end-of-line)))))
 
 (defun concept-barf-current-exposition ()
   "Separate the current exposition line from it's attribute into a new one."
