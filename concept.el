@@ -1882,7 +1882,7 @@ would work on any buffer with trailing blank characters."
           (string-trim (buffer-substring-no-properties (point) (line-end-position))))))))
 
 (defun concept-next-relationship ()
-  "Get the last concept before the current position if on a data line."
+  "Get the next relationship as a string after the current point."
   (let ((is-data (concept-on-data-line))
         (in-block (concept-in-relationship-block)))
     (when (and is-data in-block)
@@ -4875,6 +4875,16 @@ A resource line starts with an `@' symbol."
          (or (string-match-p "^| +: *$" line)
              (string-match-p "^| +:[^: ]+ *$" line)))))
 
+(defun concept-in-last-relationship-group ()
+  "Concept on the last relationship line in the current block."
+  (and (or (concept-on-relationship-line)
+           (concept-on-data-concept-line))
+       (save-excursion
+         (concept-goto-next-relationship-boundary)
+         (or (concept-on-focus-line)
+             (concept-on-resource-line)
+             (concept-in-temporary-block)))))
+
 (defun concept-on-attribute-line ()
   "Test if the current line is an attribute line.
 An attribute line ends with a colon."
@@ -5374,6 +5384,13 @@ by this command in practice."
              (forward-line)
              (concept-toggle-focus-data)
              (end-of-line))
+            ((and (concept-on-relationship-line)
+                  (not (concept-in-last-relationship-group))
+                  (string= (concept-current-relationship)
+                           (concept-next-relationship)))
+             (concept-goto-next-relationship-boundary)
+             (delete-line)
+             (end-of-line))
             ((save-excursion
                (forward-line)
                (concept-on-data-line))
@@ -5515,6 +5532,15 @@ by this command in practice."
          (insert "-")
          (end-of-line)
          (skip-chars-backward " \t"))
+        ((and (concept-on-focus-line)
+              (concept-map-has-more-concept-blocks)
+              (string= (concept-current-focus) (concept-next-focus))
+              (= (concept-resource-block-count) 0))
+         (concept-end-of-subtree)
+         (forward-char)
+         (kill-whole-line)
+         (forward-line -1)
+         (end-of-line))
         ((and (concept-on-exposition-line)
               (save-excursion
                 (forward-line)
