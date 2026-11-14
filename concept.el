@@ -248,6 +248,9 @@
 (defvar concept--consult-available-at-load
   (require 'consult nil t))
 
+(defvar concept--canprove-available-at-load
+  (require 'canprove nil t))
+
 (defvar concept--elpher-avaiable-at-load
   (require 'elpher nil t))
 
@@ -10261,6 +10264,14 @@ number, then adjust the playback speed of the video accordingly."
                 args)))
     (message "mpv has not been installed in this environment. Please install it and try again!")))
 
+(defun concept-can-prove-argument (statement)
+  "Attempt to prove the logical argument given by the string STATEMENT.
+If it is false, then it is refuted with a counterexample."
+  (interactive "sArgument: ")
+  (if (require 'canprove nil t)
+      (message "%s" (can-prove-explain-argument statement))
+    (message "The canprove package is not installed!")))
+
 (defun concept-follow-dwim ()
   "Follow the link if it recognizes the attribute group keyword and the file type.
 If the keyword is `file' but the file is not one of the recognized types
@@ -10396,6 +10407,16 @@ modifying `mailcap-user-mime-data'."
                     (with-current-buffer "*info*"
                       (goto-char (point-min))
                       (occur value))))))
+          ((and (concept-on-exposition-line)
+                (string= "argument" (concept-exposition-parent-key)))
+           (save-excursion
+             (concept-goto-last-attribute)
+             (let ((statement (mapconcat
+                              (lambda (data)
+                                (string-remove-suffix "." (string-trim data)))
+                              (concept-get-attribute-data)
+                              ". ")))
+               (concept-can-prove-argument statement))))
           ((and (concept-on-exposition-line)
                 (string= "point" (concept-exposition-parent-key)))
            (let ((keys (concept-resource-block-keys))
