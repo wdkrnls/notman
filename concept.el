@@ -6017,9 +6017,10 @@ This is intended to enter multiple data concepts at the same time."
                    (concat raw-suffix "s"))))
               (text (mapconcat
                      (lambda (x)
-                       (if (string= suffix "concepts")
-                           x
-                         (concat x "-" suffix)))
+                       (let ((name (string-trim-right x)))
+                         (if (string= suffix "concepts")
+                             name
+                           (concat name "-" suffix))))
                      candidates "\n| "))
               (marker (with-current-buffer target (copy-marker (point) t))))
     (run-at-time
