@@ -14507,6 +14507,122 @@ This is useful in conjunction with `concept-funcall-with-string-args'."
           (end (cdr reg)))
       (buffer-substring-no-properties beg end))))
 
+(defun concept--library-definitions (library)
+  "Definitions recorded for LIBRARY (a base name string) in this session."
+  (cdr (seq-find (lambda (e)
+                   (string= library (file-name-base (car e))))
+                 load-history)))
+
+(defun concept--library-entries (library)
+  "Return an alist (TYPE . SYMBOL) of definitions recorded for LIBRARY.
+Entries such as (require . FEATURE), (provide . FEATURE) and
+\(compiler-macro ...) are dropped."
+  (seq-keep (lambda (entry)
+              (cond
+               ((and (consp entry)
+                     (not (memq (car entry) '(require provide)))
+                     (symbolp (cdr entry)))
+                entry)
+               ((and entry (symbolp entry)) (cons 'defvar entry))))
+            (my-library-definitions library)))
+
+(defun concept--symbol-short-doc (sym)
+  "Return the first line of SYM's documentation, or nil."
+  (let ((doc (ignore-errors
+               (cond ((fboundp sym) (documentation sym))
+                     ((facep sym) (documentation-property sym 'face-documentation))
+                     (t (documentation-property sym 'variable-documentation))))))
+    (when (stringp doc)
+      (car (split-string doc "\n" t)))))
+
+(defconst concept--class-titles
+  '((call . "Calls") (command . "Commands") (variable . "Variables")
+    (face . "Faces") (symbol . "Symbols"))
+  "Completion group titles, by concept class.")
+
+(defun concept--cand-class (cand info)
+  "Return the concept class recorded for CAND in the hash table INFO."
+  (car (gethash (string-trim-right cand) info)))
+
+(defconst concept--library-class-suffixes
+  '((call . "calls") (command . "commands") (variable . "variables")
+    (face . "faces") (symbol . "symbols"))
+  "Suffix appended to a symbol's name, by class.")
+
+(defconst concept--library-type-classes
+  '((defun . call) (defmacro . call) (defsubst . call) (defalias . call)
+    (defvar . variable) (defconst . variable) (defcustom . variable)
+    (defvar-local . variable) (defface . face))
+  "Mapping of `load-history' definition types to concept classes.")
+
+(defun concept--classify (type sym)
+  "Return the concept class of SYM, defined by TYPE."
+  (let ((cls (alist-get type concept--library-type-classes)))
+    (cond ((eq cls 'call) (if (commandp sym) 'command 'call))
+          (cls cls)
+          (t 'symbol))))
+
+(defun concept--library-completion-table (entries)
+  "Return a cons (COLLECTION . INFO) for ENTRIES, an alist (TYPE . SYMBOL).
+COLLECTION is a completion table whose candidates are symbol names
+padded to a common width and grouped by concept class.  INFO maps
+each unpadded name to a list (CLASS TYPE SYMBOL)."
+  (let* ((name-width (apply #'max 0 (mapcar (lambda (e)
+                                              (length (symbol-name (cdr e))))
+                                            entries)))
+         (type-width (apply #'max 0 (mapcar (lambda (e)
+                                              (length (symbol-name (car e))))
+                                            entries)))
+         (name-pad (format "%%-%ds" name-width))
+         (type-pad (format "%%-%ds" type-width))
+         (info (make-hash-table :test #'equal)))
+    (dolist (e entries)
+      (puthash (symbol-name (cdr e))
+               (list (concept--classify (car e) (cdr e)) (car e) (cdr e))
+               info))
+    (cons
+     (lambda (string pred action)
+       (if (eq action 'metadata)
+           `(metadata
+             (category . concept-library-symbol)
+             (group-function
+              . ,(lambda (cand transform)
+                   (if transform
+                       cand
+                     (or (alist-get (car (gethash (string-trim-right cand) info))
+                                    concept--class-titles)
+                         "Symbols"))))
+             (annotation-function
+              . ,(lambda (cand)
+                   (when-let* ((rec (gethash (string-trim-right cand) info)))
+                     (format "  %s  %s"
+                             (format type-pad (symbol-name (nth 1 rec)))
+                             (or (concept--symbol-short-doc (nth 2 rec)) ""))))))
+         (complete-with-action
+          action
+          (mapcar (lambda (e) (format name-pad (symbol-name (cdr e)))) entries)
+          string pred)))
+     info)))
+
+(defun concept-insert-emacs-symbol-from-library-at-point (symbol)
+  "Insert SYMBOL, a definition provided by an Emacs library.
+SYMBOL is inserted with a suffix naming its class, e.g. \"foo-calls\"."
+  (interactive
+   (list
+    (let* ((library
+            (completing-read
+             "Library: "
+             (delete-dups (mapcar (lambda (e) (file-name-base (car e)))
+                                  load-history))
+             nil t))
+           (table (concept--library-completion-table
+                   (concept--library-entries library)))
+           (name (completing-read "Symbol: " (car table) nil t))
+           (trimmed (string-trim-right name))
+           (class (or (car (gethash trimmed (cdr table))) 'symbol)))
+      (concat trimmed "-" (alist-get class concept--library-class-suffixes)))))
+  (insert symbol))
+
 (defcustom concept-insert-at-point-command-menu
   '(("Emacs Lisp"
      "Call"
@@ -14520,6 +14636,9 @@ This is useful in conjunction with `concept-funcall-with-string-args'."
     ("Emacs Lisp"
      "Face"
      concept-insert-emacs-face-name-at-point)
+    ("Emacs Lisp"
+     "Library"
+     concept-insert-emacs-symbol-from-library-at-point)
     ("UNIX Shell"
      "Environment Variable"
      concept-insert-environment-variable-name-at-point)
